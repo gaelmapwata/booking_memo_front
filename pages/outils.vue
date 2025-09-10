@@ -49,6 +49,27 @@
                 </v-form>
               </v-window-item>
             </v-window>
+            <v-divider class="my-4" />
+            <div class="text-subtitle-2 mb-2">Prévisualisation</div>
+            <div class="d-flex ga-2 mb-2">
+              <v-text-field v-model.number="preview.maxRows" type="number" min="1" max="50" density="compact" label="Lignes" style="max-width: 120px" />
+              <v-text-field v-model.number="preview.maxCols" type="number" min="1" max="50" density="compact" label="Colonnes" style="max-width: 140px" />
+              <v-btn size="small" :loading="preview.loading" @click="doPreview" prepend-icon="mdi-eye">Voir</v-btn>
+            </div>
+            <div v-if="preview.data && preview.data.length">
+              <v-table density="compact" class="border rounded">
+                <thead>
+                  <tr>
+                    <th v-for="c in preview.data[0].length" :key="c">{{ colName(c) }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, r) in preview.data" :key="r">
+                    <td v-for="(cell, c) in row" :key="c">{{ cell }}</td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -249,6 +270,33 @@ async function submitWordUpload() {
     notify(e?.data?.error || e?.message || 'Erreur', 'error')
   } finally {
     wordLoading.value = false
+  }
+}
+
+const preview = reactive<{ maxRows: number; maxCols: number; loading: boolean; data: any[] | null }>({ maxRows: 10, maxCols: 10, loading: false, data: null })
+function colName(idx: number) { return columnNumberToName(idx) }
+async function doPreview() {
+  preview.loading = true
+  preview.data = null
+  try {
+    if (excelTab.value === 'path') {
+      if (!excel.filePath) throw new Error('filePath requis')
+      const res: any = await $fetch(`${config.public.apiBase}/excel/preview`, { method: 'POST', body: { filePath: excel.filePath, sheetName: excel.sheetName || undefined, maxRows: preview.maxRows, maxCols: preview.maxCols } })
+      preview.data = res?.data || []
+    } else {
+      if (!excel.file) throw new Error('fichier requis')
+      const form = new FormData()
+      form.append('file', excel.file as any)
+      form.append('sheetName', excel.sheetName || '')
+      form.append('maxRows', String(preview.maxRows))
+      form.append('maxCols', String(preview.maxCols))
+      const res: any = await $fetch(`${config.public.apiBase}/excel/preview-upload`, { method: 'POST', body: form })
+      preview.data = res?.data || []
+    }
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
+  } finally {
+    preview.loading = false
   }
 }
 </script> 
