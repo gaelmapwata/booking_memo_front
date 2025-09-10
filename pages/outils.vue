@@ -16,6 +16,10 @@
                 <v-form ref="excelFormRef" @submit.prevent="submitExcelPath">
                   <v-text-field v-model="excel.filePath" label="Chemin du fichier .xlsx" required placeholder="C:\\Users\\hp\\Documents\\test.xlsx" />
                   <v-text-field v-model="excel.sheetName" label="Nom de la feuille (optionnel)" placeholder="Feuil1" />
+                  <div class="d-flex ga-2 mb-2">
+                    <v-btn size="small" variant="tonal" @click="loadSheets" prepend-icon="mdi-file-tree">Lister feuilles</v-btn>
+                    <v-select v-if="sheets.length" v-model="excel.sheetName" :items="sheets" label="Sélectionner la feuille" density="compact" style="max-width: 280px" />
+                  </div>
                   <div class="d-flex ga-2">
                     <v-text-field v-model.number="excel.row" type="number" min="1" label="Ligne" />
                     <v-text-field v-model.number="excel.col" type="number" min="1" label="Colonne" />
@@ -49,6 +53,14 @@
                 </v-form>
               </v-window-item>
             </v-window>
+            <v-divider class="my-4" />
+            <div class="text-subtitle-2 mb-2">Écriture par nom de zone</div>
+            <div class="d-flex ga-2 mb-2">
+              <v-text-field v-model="named.name" label="Nom (ou A1)" placeholder="ClientNom" />
+              <v-text-field v-model="named.value" label="Valeur" />
+              <v-btn size="small" color="primary" :loading="named.loading" @click="writeNamedPath" prepend-icon="mdi-pencil">Écrire (chemin)</v-btn>
+              <v-btn size="small" color="primary" :loading="named.loading" @click="writeNamedUpload" prepend-icon="mdi-upload">Écrire (upload)</v-btn>
+            </div>
             <v-divider class="my-4" />
             <div class="text-subtitle-2 mb-2">Prévisualisation</div>
             <div class="d-flex ga-2 mb-2">
@@ -116,6 +128,11 @@
     </v-snackbar>
   </v-container>
 </template>
+
+<style scoped>
+.v-table tbody tr:nth-child(odd) { background: rgba(0,0,0,0.02); }
+.v-table thead th { position: sticky; top: 0; background: white; z-index: 1; }
+</style>
 
 <script setup lang="ts">
 const config = useRuntimeConfig()
@@ -297,6 +314,58 @@ async function doPreview() {
     notify(e?.data?.error || e?.message || 'Erreur', 'error')
   } finally {
     preview.loading = false
+  }
+}
+
+const sheets = ref<string[]>([])
+async function loadSheets() {
+  try {
+    if (excelTab.value === 'path') {
+      if (!excel.filePath) throw new Error('filePath requis')
+      const res: any = await $fetch(`${config.public.apiBase}/excel/sheets`, { method: 'POST', body: { filePath: excel.filePath } })
+      sheets.value = res?.sheets || []
+    } else {
+      if (!excel.file) throw new Error('fichier requis')
+      const form = new FormData()
+      form.append('file', excel.file as any)
+      const res: any = await $fetch(`${config.public.apiBase}/excel/sheets-upload`, { method: 'POST', body: form })
+      sheets.value = res?.sheets || []
+    }
+    if (sheets.value.length && !excel.sheetName) excel.sheetName = sheets.value[0]
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
+  }
+}
+
+const named = reactive<{ name: string; value: string; loading: boolean }>({ name: '', value: '', loading: false })
+async function writeNamedPath() {
+  named.loading = true
+  try {
+    if (!(excel.filePath && named.name)) throw new Error('filePath et name requis')
+    const res = await $fetch(`${config.public.apiBase}/excel/write-named`, { method: 'POST', body: { filePath: excel.filePath, name: named.name, value: named.value } })
+    notify('Écriture par nom réussie')
+    console.debug(res)
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
+  } finally {
+    named.loading = false
+  }
+}
+async function writeNamedUpload() {
+  named.loading = true
+  try {
+    if (!(excel.file && named.name)) throw new Error('fichier et name requis')
+    const form = new FormData()
+    form.append('file', excel.file as any)
+    form.append('name', named.name)
+    form.append('value', named.value)
+    const res = await $fetch(`${config.public.apiBase}/excel/write-named-upload`, { method: 'POST', body: form })
+    notify('Upload & écriture par nom réussis')
+    console.debug(res)
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
+  } finally {
+    named.loading = false
   }
 }
 </script> 
