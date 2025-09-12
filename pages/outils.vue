@@ -31,6 +31,7 @@
                     <v-btn size="small" variant="tonal" @click="syncRCFromA1">A1→RC</v-btn>
                   </div>
                   <v-text-field v-model="excel.value" label="Valeur à écrire" required />
+                  <v-text-field v-model="excel.outputPath" label="Chemin de sortie (optionnel)" placeholder="C:\\Clients\\Alice\\fichier.xlsx" />
                   <div class="d-flex ga-2 mt-2">
                     <v-btn type="submit" color="primary" :loading="excelLoading" prepend-icon="mdi-file-excel">Écrire</v-btn>
                     <v-btn variant="text" @click="resetExcel" prepend-icon="mdi-restore">Réinitialiser</v-btn>
@@ -49,6 +50,7 @@
                     <v-btn size="small" variant="tonal" @click="syncRCFromA1">A1→RC</v-btn>
                   </div>
                   <v-text-field v-model="excel.value" label="Valeur à écrire" required />
+                  <v-text-field v-model="excel.destDir" label="Dossier de sortie (optionnel)" placeholder="C:\\Clients\\Alice" />
                   <div class="d-flex ga-2 mt-2">
                     <v-btn type="submit" color="primary" :loading="excelLoading" prepend-icon="mdi-file-upload">Uploader & Écrire</v-btn>
                     <v-btn variant="text" @click="resetExcel" prepend-icon="mdi-restore">Réinitialiser</v-btn>
@@ -65,6 +67,10 @@
               <v-select v-if="names.length" v-model="named.name" :items="names" item-title="name" item-value="name" label="Noms disponibles" density="compact" style="max-width: 260px" />
               <v-btn size="small" color="primary" :loading="named.loading" @click="writeNamedPath" prepend-icon="mdi-pencil">Écrire (chemin)</v-btn>
               <v-btn size="small" color="primary" :loading="named.loading" @click="writeNamedUpload" prepend-icon="mdi-upload">Écrire (upload)</v-btn>
+            </div>
+            <div class="d-flex ga-2 mb-2">
+              <v-text-field v-model="named.outputPath" label="Chemin de sortie (optionnel)" placeholder="C:\\Clients\\Alice\\fichier.xlsx" />
+              <v-text-field v-model="named.destDir" label="Dossier de sortie (upload)" placeholder="C:\\Clients\\Alice" />
             </div>
             <v-divider class="my-4" />
             <div class="text-subtitle-2 mb-2">Prévisualisation</div>
@@ -102,6 +108,7 @@
                 <v-form @submit.prevent="submitBulkPath">
                   <v-text-field v-model="bulk.filePath" label="Chemin du fichier .xlsx" required placeholder="C:\\Users\\hp\\Documents\\test.xlsx" />
                   <v-text-field v-model="bulk.sheetName" label="Nom de la feuille (optionnel)" placeholder="Feuil1" />
+                  <v-text-field v-model="bulk.outputPath" label="Chemin de sortie (optionnel)" placeholder="C:\\Clients\\Alice\\fichier.xlsx" />
                   <v-switch v-model="bulk.respectMerges" inset color="primary" label="Respecter les fusions (écrire en haut-gauche)" />
                   <v-textarea v-model="bulk.writesText" rows="6" label="Writes (JSON)" placeholder='[{"cell":"B3","value":"Nom"},{"cell":"E10","value":12345}]' />
                   <div class="d-flex ga-2 mt-2">
@@ -114,6 +121,7 @@
                 <v-form @submit.prevent="submitBulkUpload">
                   <v-file-input v-model="bulk.file" label="Fichier .xlsx" accept=".xlsx" prepend-icon="mdi-upload" />
                   <v-text-field v-model="bulk.sheetName" label="Nom de la feuille (optionnel)" placeholder="Feuil1" />
+                  <v-text-field v-model="bulk.outputPath" label="Chemin de sortie (optionnel)" placeholder="C:\\Clients\\Alice\\fichier.xlsx" />
                   <v-switch v-model="bulk.respectMerges" inset color="primary" label="Respecter les fusions (écrire en haut-gauche)" />
                   <v-textarea v-model="bulk.writesText" rows="6" label="Writes (JSON)" placeholder='[{"cell":"B3","value":"Nom"},{"cell":"E10","value":12345}]' />
                   <div class="d-flex ga-2 mt-2">
@@ -154,6 +162,7 @@
                   <v-textarea v-model="word.replacementsText" label="Remplacements (JSON)" rows="6" placeholder='{"NOM":"Alice","DATE":"2025-09-10"}' />
                   <div class="d-flex ga-2 mt-2">
                     <v-btn type="submit" color="primary" :loading="wordLoading" prepend-icon="mdi-file-upload">Uploader & Remplacer</v-btn>
+                    <v-btn variant="tonal" :disabled="!word.lastOutputUrl" @click="downloadWordOutput" prepend-icon="mdi-download">Télécharger</v-btn>
                     <v-btn variant="text" @click="resetWord" prepend-icon="mdi-restore">Réinitialiser</v-btn>
                   </div>
                 </v-form>
@@ -208,14 +217,16 @@ function columnNameToNumber(name: string) {
 // Excel form state
 const excelTab = ref<'path' | 'upload'>('path')
 const excelFormRef = ref()
-const excel = reactive<{ filePath: string; sheetName: string; cell: string; value: string; row: number | null; col: number | null; file: File | null }>({
+const excel = reactive<{ filePath: string; sheetName: string; cell: string; value: string; row: number | null; col: number | null; file: File | null; outputPath: string; destDir: string }>({
   filePath: '',
   sheetName: '',
   cell: '',
   value: '',
   row: null,
   col: null,
-  file: null
+  file: null,
+  outputPath: '',
+  destDir: ''
 })
 const excelLoading = ref(false)
 function resetExcel() {
@@ -226,6 +237,8 @@ function resetExcel() {
   excel.row = null
   excel.col = null
   excel.file = null
+  excel.outputPath = ''
+  excel.destDir = ''
 }
 function syncA1FromRC() {
   if (excel.row && excel.col) {
@@ -245,7 +258,7 @@ async function submitExcelPath() {
     if (!(excel.filePath && cell)) throw new Error('filePath et cell/A1 sont requis')
     const res = await $fetch(`${config.public.apiBase}/excel/write`, {
       method: 'POST',
-      body: { filePath: excel.filePath, sheetName: excel.sheetName || undefined, cell, value: excel.value }
+      body: { filePath: excel.filePath, sheetName: excel.sheetName || undefined, cell, value: excel.value, outputPath: excel.outputPath || undefined }
     })
     notify('Écriture Excel réussie')
     console.debug(res)
@@ -265,6 +278,7 @@ async function submitExcelUpload() {
     form.append('sheetName', excel.sheetName || '')
     form.append('cell', cell)
     form.append('value', excel.value || '')
+    if (excel.destDir) form.append('destDir', excel.destDir)
     const res = await $fetch(`${config.public.apiBase}/excel/write-upload`, {
       method: 'POST',
       body: form
@@ -281,11 +295,12 @@ async function submitExcelUpload() {
 // Word form state
 const wordTab = ref<'path' | 'upload'>('path')
 const wordFormRef = ref()
-const word = reactive<{ templatePath: string; outputPath: string; replacementsText: string; file: File | null }>({
+const word = reactive<{ templatePath: string; outputPath: string; replacementsText: string; file: File | null; lastOutputUrl: string | null }>({
   templatePath: '',
   outputPath: '',
   replacementsText: '{"NOM":"Alice"}',
-  file: null
+  file: null,
+  lastOutputUrl: null
 })
 const wordLoading = ref(false)
 function resetWord() {
@@ -293,6 +308,7 @@ function resetWord() {
   word.outputPath = ''
   word.replacementsText = '{"NOM":"Alice"}'
   word.file = null
+  word.lastOutputUrl = null
 }
 async function submitWordPath() {
   wordLoading.value = true
@@ -325,11 +341,24 @@ async function submitWordUpload() {
     })
     notify('Upload & remplacement Word réussis')
     console.debug(res)
+    if ((res as any)?.outputUrl) {
+      word.lastOutputUrl = (res as any).outputUrl
+    }
   } catch (e: any) {
     notify(e?.data?.error || e?.message || 'Erreur', 'error')
   } finally {
     wordLoading.value = false
   }
+}
+
+function downloadWordOutput() {
+  if (!word.lastOutputUrl) return
+  const a = document.createElement('a')
+  a.href = word.lastOutputUrl
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 const preview = reactive<{ maxRows: number; maxCols: number; loading: boolean; data: any[] | null }>({ maxRows: 10, maxCols: 10, loading: false, data: null })
@@ -379,12 +408,13 @@ async function loadSheets() {
   }
 }
 
-const named = reactive<{ name: string; value: string; loading: boolean }>({ name: '', value: '', loading: false })
+const named = reactive<{ name: string; value: string; loading: boolean; outputPath: string; destDir: string }>({ name: '', value: '', loading: false, outputPath: '', destDir: '' })
 async function writeNamedPath() {
   named.loading = true
   try {
     if (!(excel.filePath && named.name)) throw new Error('filePath et name requis')
     const res = await $fetch(`${config.public.apiBase}/excel/write-named`, { method: 'POST', body: { filePath: excel.filePath, name: named.name, value: named.value } })
+    if (named.outputPath) (res as any).outputPath = named.outputPath
     notify('Écriture par nom réussie')
     console.debug(res)
   } catch (e: any) {
@@ -401,6 +431,7 @@ async function writeNamedUpload() {
     form.append('file', excel.file as any)
     form.append('name', named.name)
     form.append('value', named.value)
+    if (named.destDir) form.append('destDir', named.destDir)
     const res = await $fetch(`${config.public.apiBase}/excel/write-named-upload`, { method: 'POST', body: form })
     notify('Upload & écriture par nom réussis')
     console.debug(res)
@@ -413,13 +444,14 @@ async function writeNamedUpload() {
 
 // Bulk write state
 const bulkTab = ref<'path' | 'upload'>('path')
-const bulk = reactive<{ filePath: string; sheetName: string; writesText: string; file: File | null; loading: boolean; respectMerges: boolean }>({
+const bulk = reactive<{ filePath: string; sheetName: string; writesText: string; file: File | null; loading: boolean; respectMerges: boolean; outputPath: string }>({
   filePath: '',
   sheetName: '',
   writesText: '[{"cell":"A2","value":"MAPWATA GAEL GAEL"},{"cell":"B3","value":"Nom Client"}]',
   file: null,
   loading: false,
-  respectMerges: true
+  respectMerges: true,
+  outputPath: ''
 })
 function resetBulk() {
   bulk.filePath = ''
@@ -428,6 +460,7 @@ function resetBulk() {
   bulk.file = null
   bulk.loading = false
   bulk.respectMerges = true
+  bulk.outputPath = ''
 }
 async function submitBulkPath() {
   bulk.loading = true
@@ -436,7 +469,7 @@ async function submitBulkPath() {
     const writes = bulk.writesText?.trim() ? JSON.parse(bulk.writesText) : []
     const res = await $fetch(`${config.public.apiBase}/excel/write-bulk`, {
       method: 'POST',
-      body: { filePath: bulk.filePath, sheetName: bulk.sheetName || undefined, writes, respectMerges: bulk.respectMerges }
+      body: { filePath: bulk.filePath, sheetName: bulk.sheetName || undefined, writes, respectMerges: bulk.respectMerges, outputPath: bulk.outputPath || undefined }
     })
     notify('Écriture multiple réussie')
     console.debug(res)
@@ -455,6 +488,7 @@ async function submitBulkUpload() {
     form.append('sheetName', bulk.sheetName || '')
     form.append('respectMerges', String(bulk.respectMerges))
     form.append('writes', bulk.writesText || '[]')
+    if (bulk.outputPath) form.append('outputPath', bulk.outputPath)
     const res = await $fetch(`${config.public.apiBase}/excel/write-bulk-upload`, { method: 'POST', body: form })
     notify('Upload & écriture multiple réussis')
     console.debug(res)
