@@ -1,4 +1,7 @@
 <template>
+  <div class="py-4">
+    <h2 class="text-h6">Outils (test de rendu)</h2>
+  </div>
   <v-container class="py-8">
     <h2 class="text-h5 mb-6">Outils documents</h2>
 
@@ -58,6 +61,8 @@
             <div class="d-flex ga-2 mb-2">
               <v-text-field v-model="named.name" label="Nom (ou A1)" placeholder="ClientNom" />
               <v-text-field v-model="named.value" label="Valeur" />
+              <v-btn size="small" variant="tonal" @click="loadNames" prepend-icon="mdi-tag-multiple">Charger noms</v-btn>
+              <v-select v-if="names.length" v-model="named.name" :items="names" item-title="name" item-value="name" label="Noms disponibles" density="compact" style="max-width: 260px" />
               <v-btn size="small" color="primary" :loading="named.loading" @click="writeNamedPath" prepend-icon="mdi-pencil">Écrire (chemin)</v-btn>
               <v-btn size="small" color="primary" :loading="named.loading" @click="writeNamedUpload" prepend-icon="mdi-upload">Écrire (upload)</v-btn>
             </div>
@@ -82,6 +87,42 @@
                 </tbody>
               </v-table>
             </div>
+          </v-card-text>
+        </v-card>
+
+        <v-card class="mb-6" variant="elevated">
+          <v-card-title class="text-subtitle-1">Écriture multiple (plusieurs cellules)</v-card-title>
+          <v-card-text>
+            <v-tabs v-model="bulkTab" density="compact" class="mb-3">
+              <v-tab value="path">Fichier local</v-tab>
+              <v-tab value="upload">Upload</v-tab>
+            </v-tabs>
+            <v-window v-model="bulkTab">
+              <v-window-item value="path">
+                <v-form @submit.prevent="submitBulkPath">
+                  <v-text-field v-model="bulk.filePath" label="Chemin du fichier .xlsx" required placeholder="C:\\Users\\hp\\Documents\\test.xlsx" />
+                  <v-text-field v-model="bulk.sheetName" label="Nom de la feuille (optionnel)" placeholder="Feuil1" />
+                  <v-switch v-model="bulk.respectMerges" inset color="primary" label="Respecter les fusions (écrire en haut-gauche)" />
+                  <v-textarea v-model="bulk.writesText" rows="6" label="Writes (JSON)" placeholder='[{"cell":"B3","value":"Nom"},{"cell":"E10","value":12345}]' />
+                  <div class="d-flex ga-2 mt-2">
+                    <v-btn type="submit" color="primary" :loading="bulk.loading" prepend-icon="mdi-play">Écrire (chemin)</v-btn>
+                    <v-btn variant="text" @click="resetBulk" prepend-icon="mdi-restore">Réinitialiser</v-btn>
+                  </div>
+                </v-form>
+              </v-window-item>
+              <v-window-item value="upload">
+                <v-form @submit.prevent="submitBulkUpload">
+                  <v-file-input v-model="bulk.file" label="Fichier .xlsx" accept=".xlsx" prepend-icon="mdi-upload" />
+                  <v-text-field v-model="bulk.sheetName" label="Nom de la feuille (optionnel)" placeholder="Feuil1" />
+                  <v-switch v-model="bulk.respectMerges" inset color="primary" label="Respecter les fusions (écrire en haut-gauche)" />
+                  <v-textarea v-model="bulk.writesText" rows="6" label="Writes (JSON)" placeholder='[{"cell":"B3","value":"Nom"},{"cell":"E10","value":12345}]' />
+                  <div class="d-flex ga-2 mt-2">
+                    <v-btn type="submit" color="primary" :loading="bulk.loading" prepend-icon="mdi-file-upload">Uploader & Écrire</v-btn>
+                    <v-btn variant="text" @click="resetBulk" prepend-icon="mdi-restore">Réinitialiser</v-btn>
+                  </div>
+                </v-form>
+              </v-window-item>
+            </v-window>
           </v-card-text>
         </v-card>
       </v-col>
@@ -135,6 +176,7 @@
 </style>
 
 <script setup lang="ts">
+definePageMeta({ ssr: false })
 const config = useRuntimeConfig()
 
 const snackbar = reactive({ show: false, message: '', color: 'success' as 'success' | 'error' | 'info' })
@@ -366,6 +408,80 @@ async function writeNamedUpload() {
     notify(e?.data?.error || e?.message || 'Erreur', 'error')
   } finally {
     named.loading = false
+  }
+}
+
+// Bulk write state
+const bulkTab = ref<'path' | 'upload'>('path')
+const bulk = reactive<{ filePath: string; sheetName: string; writesText: string; file: File | null; loading: boolean; respectMerges: boolean }>({
+  filePath: '',
+  sheetName: '',
+  writesText: '[{"cell":"A2","value":"MAPWATA GAEL GAEL"},{"cell":"B3","value":"Nom Client"}]',
+  file: null,
+  loading: false,
+  respectMerges: true
+})
+function resetBulk() {
+  bulk.filePath = ''
+  bulk.sheetName = ''
+  bulk.writesText = '[{"cell":"A2","value":"MAPWATA GAEL GAEL"},{"cell":"B3","value":"Nom Client"}]'
+  bulk.file = null
+  bulk.loading = false
+  bulk.respectMerges = true
+}
+async function submitBulkPath() {
+  bulk.loading = true
+  try {
+    if (!bulk.filePath) throw new Error('filePath requis')
+    const writes = bulk.writesText?.trim() ? JSON.parse(bulk.writesText) : []
+    const res = await $fetch(`${config.public.apiBase}/excel/write-bulk`, {
+      method: 'POST',
+      body: { filePath: bulk.filePath, sheetName: bulk.sheetName || undefined, writes, respectMerges: bulk.respectMerges }
+    })
+    notify('Écriture multiple réussie')
+    console.debug(res)
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
+  } finally {
+    bulk.loading = false
+  }
+}
+async function submitBulkUpload() {
+  bulk.loading = true
+  try {
+    if (!bulk.file) throw new Error('fichier requis')
+    const form = new FormData()
+    form.append('file', bulk.file as any)
+    form.append('sheetName', bulk.sheetName || '')
+    form.append('respectMerges', String(bulk.respectMerges))
+    form.append('writes', bulk.writesText || '[]')
+    const res = await $fetch(`${config.public.apiBase}/excel/write-bulk-upload`, { method: 'POST', body: form })
+    notify('Upload & écriture multiple réussis')
+    console.debug(res)
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
+  } finally {
+    bulk.loading = false
+  }
+}
+
+const names = ref<{ name: string; ref: string }[]>([])
+async function loadNames() {
+  try {
+    if (excelTab.value === 'path') {
+      if (!excel.filePath) throw new Error('filePath requis')
+      const res: any = await $fetch(`${config.public.apiBase}/excel/names`, { method: 'POST', body: { filePath: excel.filePath } })
+      names.value = res?.names || []
+    } else {
+      if (!excel.file) throw new Error('fichier requis')
+      const form = new FormData()
+      form.append('file', excel.file as any)
+      const res: any = await $fetch(`${config.public.apiBase}/excel/names-upload`, { method: 'POST', body: form })
+      names.value = res?.names || []
+    }
+    if (names.value.length && !named.name) named.name = names.value[0].name
+  } catch (e: any) {
+    notify(e?.data?.error || e?.message || 'Erreur', 'error')
   }
 }
 </script> 

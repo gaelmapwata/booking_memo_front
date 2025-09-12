@@ -10,6 +10,6 @@ export default defineNuxtPlugin((nuxtApp) => {
       VBtn: { rounded: 'lg' }
     }
   })
-
   nuxtApp.vueApp.use(vuetify)
-}) 
+})
+
